@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn add_report(
     Json(report): Json<report::Model>,
     Extension(db): Extension<DatabaseConnection>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<String, StatusCode> {
     let report_model = report::ActiveModel {
         date: ActiveValue::Set(report.date),
         project: ActiveValue::Set(report.project),
@@ -50,7 +50,7 @@ async fn add_report(
     };
 
     match Report::insert(report_model).exec(&db).await {
-        Ok(res) => Ok(Json(json!({ "id": res.last_insert_id}))),
+        Ok(res) => Ok(res.last_insert_id.to_string()),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
