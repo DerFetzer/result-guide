@@ -11,7 +11,6 @@ use axum::{
 };
 use sea_orm::{ActiveValue, Database, DatabaseConnection, EntityTrait};
 use sea_orm_migration::prelude::*;
-use serde_json::{json, Value};
 use std::error::Error;
 
 const DB_URL: &str = "sqlite:./sqlite.db?mode=rwc";
@@ -28,6 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route("/reports", post(add_report).get(get_reports))
         .route("/reports/:id", get(get_single_report))
+        .route("/reports/:id/test_steps", post(add_teststep))
         .layer(Extension(db));
 
     axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
@@ -71,5 +71,33 @@ async fn get_single_report(
     match Report::find_by_id(report_id).one(&db).await {
         Ok(res) => Ok(Json(res)),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn add_teststep(
+    Path(report_id): Path<i32>,
+    Json(ts): Json<test_step::Model>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> (StatusCode, String) {
+    match Report::find_by_id(report_id).one(&db).await {
+        Ok(Some(report)) => {
+            let ts_model = test_step::ActiveModel {
+                name: ActiveValue::Set(ts.name),
+                step_number: ActiveValue::Set(ts.step_number),
+                date: ActiveValue::Set(ts.date),
+                verdict: ActiveValue::Set(ts.verdict),
+                report_id: ActiveValue::Set(report.id),
+                ..Default::default()
+            };
+            match TestStep::insert(ts_model).exec(&db).await {
+                Ok(res) => (StatusCode::OK, res.last_insert_id.to_string()),
+                Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
+            }
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            format!("Could not find report with id {}!", report_id),
+        ),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
     }
 }
