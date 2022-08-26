@@ -3,7 +3,12 @@ mod migrator;
 
 use entities::{prelude::*, *};
 
-use axum::{http::StatusCode, routing::post, Extension, Json, Router};
+use axum::{
+    extract::Path,
+    http::StatusCode,
+    routing::{get, post},
+    Extension, Json, Router,
+};
 use sea_orm::{ActiveValue, Database, DatabaseConnection, EntityTrait};
 use sea_orm_migration::prelude::*;
 use serde_json::{json, Value};
@@ -17,11 +22,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let schema_manager = SchemaManager::new(&db);
 
-    migrator::Migrator::refresh(&db).await?;
+    migrator::Migrator::up(&db, None).await?;
     assert!(schema_manager.has_table("report").await?);
 
     let app = Router::new()
-        .route("/reports", post(add_report))
+        .route("/reports", post(add_report).get(get_reports))
+        .route("/reports/:id", get(get_single_report))
         .layer(Extension(db));
 
     axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
@@ -45,6 +51,25 @@ async fn add_report(
 
     match Report::insert(report_model).exec(&db).await {
         Ok(res) => Ok(Json(json!({ "id": res.last_insert_id}))),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn get_reports(
+    Extension(db): Extension<DatabaseConnection>,
+) -> Result<Json<Vec<report::Model>>, StatusCode> {
+    match Report::find().all(&db).await {
+        Ok(res) => Ok(Json(res)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn get_single_report(
+    Path(report_id): Path<i32>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> Result<Json<Option<report::Model>>, StatusCode> {
+    match Report::find_by_id(report_id).one(&db).await {
+        Ok(res) => Ok(Json(res)),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
