@@ -9,7 +9,10 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-use sea_orm::{ActiveValue, Database, DatabaseConnection, EntityTrait};
+use sea_orm::{
+    ActiveValue, ColumnTrait, Database, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
+    TransactionTrait,
+};
 use sea_orm_migration::prelude::*;
 use std::error::Error;
 
@@ -26,8 +29,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let app = Router::new()
         .route("/reports", post(add_report).get(get_reports))
-        .route("/reports/:id", get(get_single_report))
-        .route("/reports/:id/test_steps", post(add_teststep))
+        .route("/reports/:id", get(get_single_report).delete(delete_report))
+        .route(
+            "/reports/:id/test_steps",
+            post(add_teststep).get(get_teststeps_for_report),
+        )
+        .route("/test_steps", get(get_teststeps))
+        .route("/test_steps/:id", get(get_single_teststep))
         .layer(Extension(db));
 
     axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
@@ -94,6 +102,67 @@ async fn add_teststep(
                 Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
             }
         }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            format!("Could not find report with id {}!", report_id),
+        ),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
+    }
+}
+
+async fn get_single_teststep(
+    Path(teststp_id): Path<i32>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> Result<Json<Option<test_step::Model>>, StatusCode> {
+    match TestStep::find_by_id(teststp_id).one(&db).await {
+        Ok(res) => Ok(Json(res)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn get_teststeps(
+    Extension(db): Extension<DatabaseConnection>,
+) -> Result<Json<Vec<test_step::Model>>, StatusCode> {
+    match TestStep::find().all(&db).await {
+        Ok(res) => Ok(Json(res)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn get_teststeps_for_report(
+    Path(report_id): Path<i32>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> Result<Json<Vec<test_step::Model>>, StatusCode> {
+    match Report::find_by_id(report_id).one(&db).await {
+        Ok(Some(report)) => match report.find_related(TestStep).all(&db).await {
+            Ok(res) => Ok(Json(res)),
+            Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        },
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn delete_report(
+    Path(report_id): Path<i32>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> (StatusCode, String) {
+    match Report::find_by_id(report_id).one(&db).await {
+        Ok(Some(report)) => match db
+            .transaction(|txn| {
+                Box::pin(async move {
+                    test_step::Entity::delete_many()
+                        .filter(test_step::Column::ReportId.eq(report.id))
+                        .exec(txn)
+                        .await?;
+                    report.delete(txn).await
+                })
+            })
+            .await
+        {
+            Ok(_) => (StatusCode::OK, String::new()),
+            Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
+        },
         Ok(None) => (
             StatusCode::NOT_FOUND,
             format!("Could not find report with id {}!", report_id),
