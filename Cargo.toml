@@ -9,6 +9,8 @@ edition = "2021"
 sea-orm = { version = "0.10", features = [ "sqlx-sqlite", "runtime-tokio-native-tls", "macros" ] }
 sea-orm-migration = "0.10"
 tokio = { version = "1", features = [ "full" ] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = "0.5"
 hyper = { version = "0.14", features = [ "full" ] }
 tower = "0.4"

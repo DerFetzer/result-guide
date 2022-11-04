@@ -1265,6 +1265,8 @@ dependencies = [
  "temp-file",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

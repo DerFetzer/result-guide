@@ -18,6 +18,10 @@ use std::error::Error;
 
 const DB_URL: &str = "sqlite:./sqlite.db?mode=rwc";
 
+fn init_tracing() {
+    tracing_subscriber::fmt().with_test_writer().init();
+}
+
 fn app(db: DatabaseConnection) -> Router {
     Router::new()
         .route("/reports", post(add_report).get(get_reports))
@@ -33,6 +37,7 @@ fn app(db: DatabaseConnection) -> Router {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    init_tracing();
     let db = Database::connect(DB_URL).await?;
 
     let schema_manager = SchemaManager::new(&db);
