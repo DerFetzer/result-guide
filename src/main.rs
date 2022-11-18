@@ -1,9 +1,12 @@
 mod entities;
+mod error;
 mod migrator;
 
 use entities::{prelude::*, *};
 
+use crate::error::RgError;
 use axum::{
+    debug_handler,
     extract::Path,
     http::StatusCode,
     routing::{get, post},
@@ -54,10 +57,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[debug_handler]
 async fn add_report(
-    Json(report): Json<report::Model>,
+    report: String,
     Extension(db): Extension<DatabaseConnection>,
-) -> Result<String, StatusCode> {
+) -> Result<String, RgError> {
+    let report: report::Model = serde_json::from_str(&report)
+        .map_err(|e| RgError::from(e).with_status_code(StatusCode::BAD_REQUEST))?;
+
     let report_model = report::ActiveModel {
         date: ActiveValue::Set(report.date),
         project: ActiveValue::Set(report.project),
@@ -66,10 +73,8 @@ async fn add_report(
         ..Default::default()
     };
 
-    match Report::insert(report_model).exec(&db).await {
-        Ok(res) => Ok(res.last_insert_id.to_string()),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
+    let res = Report::insert(report_model).exec(&db).await?;
+    Ok(res.last_insert_id.to_string())
 }
 
 async fn get_reports(
@@ -190,6 +195,35 @@ mod tests {
     use serde_json::json;
     use temp_file::TempFile;
     use tower::{Service, ServiceExt};
+
+    #[tokio::test]
+    async fn test_error_cases_for_add_report_with_wrong_format() {
+        let (db, _tmp_file) = setup_empty_temp_database().await;
+        let mut app = app(db);
+
+        // Add report
+        let response = app
+            .call(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/reports")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(&json!(
+                        {"date": "today",
+                        "project": "TestProjekt",
+                        "name": "TestReport",
+                        "verdict": "PASSED"}))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(body, "\"today\" is not a valid date.");
+    }
 
     async fn setup_empty_temp_database() -> (DatabaseConnection, TempFile) {
         let tmp_file = temp_file::empty();
