@@ -4,7 +4,7 @@ mod migrator;
 
 use entities::{prelude::*, *};
 
-use crate::error::RgError;
+use crate::error::{RgError, WithStatusCode};
 use axum::{
     debug_handler,
     extract::Path,
@@ -12,6 +12,7 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
+use eyre::eyre;
 use sea_orm::{
     ActiveValue, ColumnTrait, Database, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
     TransactionTrait,
@@ -62,8 +63,8 @@ async fn add_report(
     report: String,
     Extension(db): Extension<DatabaseConnection>,
 ) -> Result<String, RgError> {
-    let report: report::Model = serde_json::from_str(&report)
-        .map_err(|e| RgError::from(e).with_status_code(StatusCode::BAD_REQUEST))?;
+    let report: report::Model =
+        serde_json::from_str(&report).with_status_code(StatusCode::BAD_REQUEST)?;
 
     let report_model = report::ActiveModel {
         date: ActiveValue::Set(report.date),
@@ -79,21 +80,23 @@ async fn add_report(
 
 async fn get_reports(
     Extension(db): Extension<DatabaseConnection>,
-) -> Result<Json<Vec<report::Model>>, StatusCode> {
-    match Report::find().all(&db).await {
-        Ok(res) => Ok(Json(res)),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
+) -> Result<Json<Vec<report::Model>>, RgError> {
+    Ok(Json(
+        Report::find()
+            .all(&db)
+            .await
+            .with_status_code(StatusCode::INTERNAL_SERVER_ERROR)?,
+    ))
 }
 
 async fn get_single_report(
     Path(report_id): Path<i32>,
     Extension(db): Extension<DatabaseConnection>,
-) -> Result<Json<report::Model>, StatusCode> {
+) -> Result<Json<report::Model>, RgError> {
     match Report::find_by_id(report_id).one(&db).await {
-        Ok(Some(res)) => Ok(Json(res)),
-        Ok(None) => Err(StatusCode::NOT_FOUND),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Ok(None) => Err(eyre!("Could not find report")).with_status_code(StatusCode::NOT_FOUND),
+        Ok(Some(x)) => Ok(Json(x)),
+        Err(e) => Err(RgError::from(e).with_status_code(StatusCode::INTERNAL_SERVER_ERROR)),
     }
 }
 
@@ -222,7 +225,10 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(body, "\"today\" is not a valid date.");
+        assert_eq!(
+            body,
+            "input contains invalid characters at line 1 column 15"
+        );
     }
 
     async fn setup_empty_temp_database() -> (DatabaseConnection, TempFile) {
@@ -343,6 +349,6 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(body, "");
+        assert_eq!(body, "Could not find report");
     }
 }
