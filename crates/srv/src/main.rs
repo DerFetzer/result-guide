@@ -6,8 +6,7 @@ use entities::{prelude::*, *};
 
 use crate::error::{RgError, WithStatusCode};
 use axum::{
-    debug_handler,
-    extract::Path,
+    extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
     Extension, Json, Router,
@@ -36,7 +35,7 @@ fn app(db: DatabaseConnection) -> Router {
         )
         .route("/test_steps", get(get_teststeps))
         .route("/test_steps/:id", get(get_single_teststep))
-        .layer(Extension(db))
+        .with_state(db)
 }
 
 #[tokio::main]
@@ -58,10 +57,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[debug_handler]
 async fn add_report(
+    State(db): State<DatabaseConnection>,
     report: String,
-    Extension(db): Extension<DatabaseConnection>,
 ) -> Result<String, RgError> {
     let report: report::Model =
         serde_json::from_str(&report).with_status_code(StatusCode::BAD_REQUEST)?;
@@ -91,7 +89,7 @@ async fn get_reports(
 
 async fn get_single_report(
     Path(report_id): Path<i32>,
-    Extension(db): Extension<DatabaseConnection>,
+    State(db): State<DatabaseConnection>,
 ) -> Result<Json<report::Model>, RgError> {
     match Report::find_by_id(report_id).one(&db).await {
         Ok(None) => Err(eyre!("Could not find report")).with_status_code(StatusCode::NOT_FOUND),
@@ -102,8 +100,8 @@ async fn get_single_report(
 
 async fn add_teststep(
     Path(report_id): Path<i32>,
+    State(db): State<DatabaseConnection>,
     Json(ts): Json<test_step::Model>,
-    Extension(db): Extension<DatabaseConnection>,
 ) -> (StatusCode, String) {
     match Report::find_by_id(report_id).one(&db).await {
         Ok(Some(report)) => {
@@ -130,7 +128,7 @@ async fn add_teststep(
 
 async fn get_single_teststep(
     Path(teststp_id): Path<i32>,
-    Extension(db): Extension<DatabaseConnection>,
+    State(db): State<DatabaseConnection>,
 ) -> Result<Json<Option<test_step::Model>>, StatusCode> {
     match TestStep::find_by_id(teststp_id).one(&db).await {
         Ok(res) => Ok(Json(res)),
@@ -139,7 +137,7 @@ async fn get_single_teststep(
 }
 
 async fn get_teststeps(
-    Extension(db): Extension<DatabaseConnection>,
+    State(db): State<DatabaseConnection>,
 ) -> Result<Json<Vec<test_step::Model>>, StatusCode> {
     match TestStep::find().all(&db).await {
         Ok(res) => Ok(Json(res)),
@@ -149,7 +147,7 @@ async fn get_teststeps(
 
 async fn get_teststeps_for_report(
     Path(report_id): Path<i32>,
-    Extension(db): Extension<DatabaseConnection>,
+    State(db): State<DatabaseConnection>,
 ) -> Result<Json<Vec<test_step::Model>>, StatusCode> {
     match Report::find_by_id(report_id).one(&db).await {
         Ok(Some(report)) => match report.find_related(TestStep).all(&db).await {
@@ -163,7 +161,7 @@ async fn get_teststeps_for_report(
 
 async fn delete_report(
     Path(report_id): Path<i32>,
-    Extension(db): Extension<DatabaseConnection>,
+    State(db): State<DatabaseConnection>,
 ) -> (StatusCode, String) {
     match Report::find_by_id(report_id).one(&db).await {
         Ok(Some(report)) => match db

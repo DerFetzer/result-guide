@@ -7,7 +7,7 @@ fn main() {
     eframe::run_native(
         "Result Guide",
         options,
-        Box::new(|_cc| Box::new(ResultGuideGui::default())),
+        Box::new(|_cc| Box::<ResultGuideGui>::default()),
     );
 }
 
@@ -62,7 +62,7 @@ impl eframe::App for ResultGuideGui {
             }
             ui.label(match &self.resp {
                 Some(resp) => resp.clone(),
-                None => String::new()
+                None => String::new(),
             });
         });
     }
