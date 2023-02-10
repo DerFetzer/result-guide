@@ -8,7 +8,8 @@ fn main() {
         "Result Guide",
         options,
         Box::new(|_cc| Box::<ResultGuideGui>::default()),
-    );
+    )
+    .unwrap();
 }
 
 struct ResultGuideGui {
