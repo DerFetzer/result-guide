@@ -1,4 +1,3 @@
-mod entities;
 mod error;
 mod migrator;
 
@@ -77,7 +76,7 @@ async fn add_report(
 }
 
 async fn get_reports(
-    Extension(db): Extension<DatabaseConnection>,
+    State(db): State<DatabaseConnection>,
 ) -> Result<Json<Vec<report::Model>>, RgError> {
     Ok(Json(
         Report::find()

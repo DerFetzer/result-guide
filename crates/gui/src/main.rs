@@ -1,4 +1,10 @@
+mod cli;
+
+use clap::Parser;
+use cli::Cli;
 use eframe::egui;
+use entities::prelude::*;
+
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 
@@ -7,7 +13,7 @@ fn main() {
     eframe::run_native(
         "Result Guide",
         options,
-        Box::new(|_cc| Box::<ResultGuideGui>::default()),
+        Box::new(|_cc| Box::new(ResultGuideGui::new(Cli::parse()))),
     )
     .unwrap();
 }
@@ -18,28 +24,27 @@ struct ResultGuideGui {
     rx: Receiver<ApiResponse>,
 }
 
-enum ApiRequest {
-    GetReports,
-}
-enum ApiResponse {
-    Raw(String),
-}
-
-impl Default for ResultGuideGui {
-    fn default() -> Self {
+impl ResultGuideGui {
+    fn new(cli: Cli) -> Self {
         let (req_tx, req_rx) = std::sync::mpsc::channel();
         let (resp_tx, resp_rx) = std::sync::mpsc::channel();
 
-        std::thread::spawn(move || loop {
-            match req_rx.recv() {
-                Ok(ApiRequest::GetReports) => {
-                    let body = reqwest::blocking::get("https://www.rust-lang.org")
-                        .unwrap()
-                        .text()
-                        .unwrap();
-                    resp_tx.send(ApiResponse::Raw(body)).unwrap();
+        std::thread::spawn(move || {
+            let host_name = cli.host.unwrap_or("localhost".to_string());
+            let port = cli.port.unwrap_or(80);
+            let url = format!("http://{host_name}:{port}");
+            loop {
+                match req_rx.recv() {
+                    Ok(ApiRequest::GetReports) => {
+                        let command_url = format!("{url}/reports");
+                        let body = reqwest::blocking::get(&command_url)
+                            .unwrap()
+                            .text()
+                            .unwrap();
+                        resp_tx.send(ApiResponse::Raw(body)).unwrap();
+                    }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
 
@@ -49,6 +54,14 @@ impl Default for ResultGuideGui {
             rx: resp_rx,
         }
     }
+}
+
+enum ApiRequest {
+    GetReports,
+}
+enum ApiResponse {
+    Raw(String),
+    Report(Vec<Report>),
 }
 
 impl eframe::App for ResultGuideGui {
