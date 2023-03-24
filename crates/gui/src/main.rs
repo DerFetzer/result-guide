@@ -3,7 +3,7 @@ mod cli;
 use clap::Parser;
 use cli::Cli;
 use eframe::egui;
-use entities::prelude::*;
+use entities::report::Model as Report;
 
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
@@ -19,7 +19,7 @@ fn main() {
 }
 
 struct ResultGuideGui {
-    resp: Option<String>,
+    resp: Option<Vec<Report>>,
     tx: Sender<ApiRequest>,
     rx: Receiver<ApiResponse>,
 }
@@ -41,7 +41,7 @@ impl ResultGuideGui {
                             .unwrap()
                             .text()
                             .unwrap();
-                        resp_tx.send(ApiResponse::Raw(body)).unwrap();
+                        resp_tx.send(ApiResponse::Report(serde_json::from_str(&body).unwrap())).unwrap();
                     }
                     Err(_) => break,
                 }
@@ -71,11 +71,11 @@ impl eframe::App for ResultGuideGui {
             if ui.button("Get Reports").clicked() {
                 self.tx.send(ApiRequest::GetReports).unwrap()
             }
-            if let Ok(ApiResponse::Raw(resp)) = self.rx.try_recv() {
+            if let Ok(ApiResponse::Report(resp)) = self.rx.try_recv() {
                 self.resp = Some(resp);
             }
             ui.label(match &self.resp {
-                Some(resp) => resp.clone(),
+                Some(resp) => format!("{resp:?}"),
                 None => String::new(),
             });
         });
