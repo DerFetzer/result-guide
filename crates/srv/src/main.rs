@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
-    Extension, Json, Router,
+    Json, Router,
 };
 use eyre::eyre;
 use sea_orm::{
