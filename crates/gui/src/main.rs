@@ -6,6 +6,7 @@ use eframe::egui;
 use entities::report::Model as Report;
 use entities::test_step::Model as TestStep;
 
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
@@ -22,10 +23,11 @@ fn main() {
 
 struct ResultGuideGui {
     reports: Option<Vec<Report>>,
-    test_steps: Option<Vec<TestStep>>,
+    test_steps: HashMap<i32, Vec<TestStep>>,
     last_error: Option<eyre::Report>,
     tx: Sender<ApiRequest>,
     rx: Receiver<ApiResponse>,
+    waiting_for_response: u8,
 }
 
 impl ResultGuideGui {
@@ -76,10 +78,11 @@ impl ResultGuideGui {
 
         Self {
             reports: None,
-            test_steps: None,
+            test_steps: HashMap::new(),
             last_error: None,
             tx: req_tx,
             rx: resp_rx,
+            waiting_for_response: 0,
         }
     }
 }
@@ -89,6 +92,7 @@ enum ApiRequest {
     GetTestSteps(i32),
 }
 enum ApiResponse {
+    #[allow(unused)]
     Raw(String),
     Reports(Vec<Report>),
     TestSteps(Vec<TestStep>),
@@ -100,38 +104,72 @@ impl eframe::App for ResultGuideGui {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Result Guide");
             if ui.button("Get Reports").clicked() {
+                self.waiting_for_response = self.waiting_for_response.saturating_add(1);
                 self.tx.send(ApiRequest::GetReports).unwrap()
             }
             if ui.button("Get TestSteps of first shown Report").clicked() {
                 if let Some([first, ..]) = &self.reports.as_deref() {
+                    self.waiting_for_response = self.waiting_for_response.saturating_add(1);
                     self.tx.send(ApiRequest::GetTestSteps(first.id)).unwrap()
                 }
             }
             match self.rx.try_recv() {
                 Ok(ApiResponse::Reports(resp)) => {
+                    self.waiting_for_response = self.waiting_for_response.saturating_sub(1);
                     self.reports = Some(resp);
                     self.last_error = None;
                 }
                 Ok(ApiResponse::TestSteps(resp)) => {
-                    self.test_steps = Some(resp);
-                    self.last_error = None;
+                    if let Some(first_report) = resp.first() {
+                        self.waiting_for_response = self.waiting_for_response.saturating_sub(1);
+                        self.test_steps.insert(first_report.report_id, resp);
+                        self.last_error = None;
+                    }
                 }
-                Ok(ApiResponse::Error(e)) => self.last_error = Some(e),
+                Ok(ApiResponse::Error(e)) => {
+                    self.waiting_for_response = self.waiting_for_response.saturating_sub(1);
+                    self.last_error = Some(e)
+                }
                 Err(TryRecvError::Disconnected) => panic!("waaah!"),
                 _ => (),
             }
-            ui.label(match &self.reports {
-                Some(resp) => format!("{resp:?}"),
-                None => String::new(),
-            });
-            ui.label(match &self.test_steps {
-                Some(resp) => format!("{resp:?}"),
-                None => String::new(),
-            });
+            egui::Grid::new("reports")
+                .num_columns(1)
+                .striped(true)
+                .show(ui, |ui| {
+                    for report in self.reports.iter().flatten() {
+                        let report_details = ui.collapsing(report.to_string(), |ui| {
+                            egui::Grid::new("steps")
+                                .num_columns(4)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    if let Some(steps) = self.test_steps.get(&report.id) {
+                                        for step in steps {
+                                            ui.label(step.step_number.to_string());
+                                            ui.label(&step.name);
+                                            ui.label(&step.verdict);
+                                            ui.label(step.date.to_string());
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                        });
+                        if report_details.header_response.clicked() && report_details.openness < 0.5
+                        {
+                            // self.test_steps.remove(&report.id);  // jedes Mal löschen damit man mehrmals Aufklappen kann um die Verzögerung besser zu beurteilen
+                            self.waiting_for_response = self.waiting_for_response.saturating_add(1);
+                            self.tx.send(ApiRequest::GetTestSteps(report.id)).unwrap()
+                        }
+                        ui.end_row();
+                    }
+                });
             ui.label(match &self.last_error {
                 Some(e) => egui::RichText::new(e.to_string()).color(egui::Color32::RED),
                 None => egui::RichText::new(""),
             });
         });
+        if self.waiting_for_response > 0 {
+            ctx.request_repaint();
+        }
     }
 }
